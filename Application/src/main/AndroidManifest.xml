@@ -13,8 +13,15 @@
         android:theme="@style/AppTheme">
         <activity android:name=".CompanionActivity">
             <intent-filter>
-                <action android:name="com.veetouine.classiccarbonwatchface.WATCHFACE_CONFIGURATION" />
+                <action android:name="com.veetouine.classiccarbonwatchface.CONFIGURATION" />
                 <category android:name="com.veetouine.classiccarbonwatchface.category.COMPANION_CONFIGURATION" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".ApplicationConfigActivity">
+            <intent-filter>
+                <action android:name="com.veetouine.classiccarbonwatchface.CONFIGURATION" />
+                <category android:name="com.veetouine.classiccarbonwatchface.category.APPLICATION_CONFIGURATION" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>

@@ -31,6 +31,8 @@ import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v7.graphics.Palette;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceService;
@@ -38,10 +40,20 @@ import android.support.wearable.watchface.WatchFaceStyle;
 import android.view.SurfaceHolder;
 import android.widget.Toast;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataItem;
+import com.google.android.gms.wearable.DataItemBuffer;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.DataMapItem;
+import com.google.android.gms.wearable.Wearable;
+
 import java.lang.ref.WeakReference;
-import java.text.SimpleDateFormat;
 import java.util.Calendar;
-import java.util.Date;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
@@ -88,7 +100,13 @@ public class ClassicCarbonWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine {
+    private class Engine extends CanvasWatchFaceService.Engine implements
+            GoogleApiClient.ConnectionCallbacks,
+            GoogleApiClient.OnConnectionFailedListener {
+
+
+        private GoogleApiClient mGoogleApiClient;
+
         private static final float HOUR_STROKE_WIDTH = 5f;
         private static final float MINUTE_STROKE_WIDTH = 3f;
         private static final float SECOND_TICK_STROKE_WIDTH = 2f;
@@ -136,6 +154,7 @@ public class ClassicCarbonWatchFace extends CanvasWatchFaceService {
         private float batteryLevelHandLength;
         private Paint BatteryPercentagePaint;
         private boolean mRegisteredBatteryPercentageReceiver = false;
+        private int batteryHandColor = 0xffff0000;
 
         private Paint DatePaint;
 
@@ -152,6 +171,12 @@ public class ClassicCarbonWatchFace extends CanvasWatchFaceService {
         @Override
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
+
+            mGoogleApiClient = new GoogleApiClient.Builder(ClassicCarbonWatchFace.this)
+                    .addApi(Wearable.API)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .build();
 
             setWatchFaceStyle(new WatchFaceStyle.Builder(ClassicCarbonWatchFace.this)
                     .setCardPeekMode(WatchFaceStyle.PEEK_MODE_SHORT)
@@ -184,7 +209,7 @@ public class ClassicCarbonWatchFace extends CanvasWatchFaceService {
             mMinutePaint.setShadowLayer(SHADOW_RADIUS, 0, 0, mWatchHandShadowColor);
 
             mSecondPaint = new Paint();
-            mSecondPaint.setColor(mWatchHandHighlightColor);
+            mSecondPaint.setColor(Color.RED);
             mSecondPaint.setStrokeWidth(SECOND_TICK_STROKE_WIDTH);
             mSecondPaint.setAntiAlias(true);
             mSecondPaint.setStrokeCap(Paint.Cap.ROUND);
@@ -198,7 +223,7 @@ public class ClassicCarbonWatchFace extends CanvasWatchFaceService {
             mTickAndCirclePaint.setShadowLayer(SHADOW_RADIUS, 0, 0, mWatchHandShadowColor);
 
             BatteryPercentagePaint = new Paint();
-            BatteryPercentagePaint.setColor(Color.WHITE);
+            BatteryPercentagePaint.setColor(batteryHandColor);
             BatteryPercentagePaint.setStrokeWidth(BATTERY_TICK_STROKE_WIDTH);
             BatteryPercentagePaint.setAntiAlias(true);
             BatteryPercentagePaint.setTextSize(29);
@@ -230,6 +255,7 @@ public class ClassicCarbonWatchFace extends CanvasWatchFaceService {
         @Override
         public void onDestroy() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
+            releaseGoogleApiClient();
             super.onDestroy();
         }
 
@@ -586,6 +612,76 @@ public class ClassicCarbonWatchFace extends CanvasWatchFaceService {
                         - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
                 mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
+        }
+
+        private void releaseGoogleApiClient() {
+            if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+                Wearable.DataApi.removeListener(mGoogleApiClient,
+                        onDataChangedListener);
+                mGoogleApiClient.disconnect();
+            }
+        }
+
+        @Override
+        public void onConnected(@Nullable Bundle bundle) {
+            Wearable.DataApi.addListener(mGoogleApiClient,
+                    onDataChangedListener);
+            Wearable.DataApi.getDataItems(mGoogleApiClient).
+                    setResultCallback(onConnectedResultCallback);
+        }
+        private void updateParamsForDataItem(DataItem item) {
+
+            if ((item.getUri().getPath()).equals("/watch_face_config")) {
+                DataMap dataMap = DataMapItem.fromDataItem(item).getDataMap();
+                if (dataMap.containsKey("batteryHandColor")) {
+                    int tc = dataMap.getInt("batteryHandColor");
+                    BatteryPercentagePaint.setColor(tc);
+                    invalidate();                }
+
+            }
+        }
+        private final DataApi.DataListener onDataChangedListener =
+                new DataApi.DataListener() {
+                    @Override
+                    public void onDataChanged(DataEventBuffer dataEvents) {
+                        for (DataEvent event : dataEvents) {
+                            if (event.getType() == DataEvent.TYPE_CHANGED) {
+                                DataItem item = event.getDataItem();
+                                updateParamsForDataItem(item);
+                            }
+                        }
+
+                        dataEvents.release();
+                        if (isVisible() && !isInAmbientMode()) {
+                            invalidate();
+                        }
+                    }
+                };
+
+        private final ResultCallback<DataItemBuffer>
+                onConnectedResultCallback =
+                new ResultCallback<DataItemBuffer>() {
+                    @Override
+                    public void onResult(DataItemBuffer dataItems) {
+                        for (DataItem item : dataItems) {
+                            updateParamsForDataItem(item);
+                        }
+
+                        dataItems.release();
+                        if (isVisible() && !isInAmbientMode()) {
+                            invalidate();
+                        }
+                    }
+                };
+
+        @Override
+        public void onConnectionSuspended(int i) {
+
+        }
+
+        @Override
+        public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+
         }
     }
 }
